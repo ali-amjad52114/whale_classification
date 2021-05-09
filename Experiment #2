@@ -1,0 +1,93 @@
+# Run using tf environment and AIkernel
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from glob import glob                # Finds all the pathnames that match with specified pattern   
+import librosa as lr                 # Library for audio files analysis
+import csv                           # Handling of CSV files    
+import IPython.display as ipd          # For playing audio inside the jupyter notebook
+import librosa.display
+import soundfile as sf
+from IPython.display import Audio
+from keras.models import Sequential
+import keras
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler 
+
+from keras import layers
+from keras import layers
+from keras.models import Sequential
+import warnings
+warnings.filterwarnings('ignore')
+
+ # Set diretory for source files
+
+audio_path = "./Marine_explore/train/"
+audio_files=glob(audio_path+'/*.aiff')
+
+header = 'filename chroma_stft rmse spectral_centroid spectral_bandwidth rolloff zero_crossing_rate'
+for i in range(1, 21):
+    header += f' mfcc{i}'
+header += ' label'
+header = header.split()
+
+# Feature extraction
+file = open('d23.csv', 'w', newline='')
+with file:
+    writer = csv.writer(file)
+    writer.writerow(header)
+for i in range (0,len(audio_files),1):
+        y,sr= lr.load(audio_files[i])      
+        rmse = lr.feature.rms(y=y)
+        chroma_stft = lr.feature.chroma_stft(y=y, sr=sr)
+        spec_cent = lr.feature.spectral_centroid(y=y, sr=sr)
+        spec_bw = lr.feature.spectral_bandwidth(y=y, sr=sr)
+        rolloff = lr.feature.spectral_rolloff(y=y, sr=sr)
+        zcr = lr.feature.zero_crossing_rate(y)
+        mfcc = lr.feature.mfcc(y=y, sr=sr)
+        to_append = f'{i} {np.mean(chroma_stft)} {np.mean(rmse)} {np.mean(spec_cent)} {np.mean(spec_bw)} {np.mean(rolloff)} {np.mean(zcr)}'    
+        for e in mfcc:
+            to_append += f' {np.mean(e)}'
+        to_append += f' {file}'
+        file = open('d23.csv', 'a', newline='')
+        with file:
+            writer = csv.writer(file)
+            writer.writerow(to_append.split())
+            
+            # Prepare data for scalling
+
+data = pd.read_csv('labels.csv',index_col=False)   #index_Col = false because data was being shifted two columns to right
+
+data = data.drop(['label'],axis=1)             # Drop wrong label coloumn
+
+features_and_label_file=pd.concat([data,df_labels],axis=1)
+
+features_and_label_file = features_and_label_file.drop(['filename'],axis=1)
+features_and_label_file = features_and_label_file.drop(['clip_name'],axis=1)
+
+print(features_and_label_file.columns)
+
+
+y = features_and_label_file.iloc[:,-1]
+
+print(y)
+    #Scale the data
+scaler = StandardScaler()
+X = scaler.fit_transform(np.array(features_and_label_file.iloc[:, :-2], dtype = float)) #Scaling the Feature columns
+
+print(X)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2) #Dividing data into training and Testing set
+
+model = Sequential()
+model.add(layers.Dense(39, activation='relu', input_shape=(X_train.shape[1],)))
+model.add(layers.Dense(26, activation='relu'))
+model.add(layers.Dense(13, activation='relu'))
+model.add(layers.Dense(5, activation='relu'))
+model.add(layers.Dense(2, activation='softmax'))
+model.compile(optimizer='adam',loss='sparse_categorical_crossentropy',metrics=['accuracy'])
+
+classifier = model.fit(X_train,
+                    y_train,
+                    epochs=100,
+                    batch_size=4)

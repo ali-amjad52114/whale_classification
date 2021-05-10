@@ -1,0 +1,143 @@
+%pip install numpy
+%pip install sklearn
+%pip install matplotlib
+%pip install pandas
+%pip install torch
+%pip install imbalanced-learn
+%pip install librosa
+%pip install lightgbm
+%pip install keras
+%pip install tensorflow
+%pip install keras-applications
+
+import aifc
+import tensorflow as tf
+import keras
+import PIL
+import gc
+from os import listdir
+import torch
+import torch.optim as optim
+import torch.nn as nn
+from torch.utils.data import TensorDataset, DataLoader
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, classification_report
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix
+from imblearn.over_sampling import SMOTE, ADASYN
+import matplotlib.pyplot as plt
+from matplotlib.image import imread
+
+# Definations for the project
+def read_dataset(directory):
+    data = []
+    for file_name in sorted(listdir(f"{directory}/train")):
+        file_path = f"{directory}/train/{file_name}"
+        file_audio = aifc.open(file_path)
+        bytes_array = file_audio.readframes(file_audio.getnframes())
+        data.append(np.fromstring(bytes_array, np.short).byteswap())
+        frame_rate = file_audio.getframerate()
+        
+    return frame_rate, np.array(data)
+
+
+def generate_image(_data, _frame_rate, _name):
+    plt.figure(figsize=(12, 12), dpi=60)
+    Pxx, freqs, bins, im = plt.specgram(_data, Fs=_frame_rate, noverlap=90, cmap=plt.cm.gist_heat)
+    plt.axis('off')
+    plt.savefig(f'{IMAGE_PATH}/{_name}.png', bbox_inches='tight')
+    plt.close()
+
+
+def generate_image_dataset(directory):
+    for file_name in sorted(listdir(f"{directory}/train")):
+        file_path = f"{directory}/train/{file_name}"
+        file_audio = aifc.open(file_path)
+        bytes_array = file_audio.readframes(file_audio.getnframes())
+        image_data = np.fromstring(bytes_array, np.short).byteswap()
+        frame_rate = file_audio.getframerate()
+        
+        generate_image(image_data, frame_rate, file_name)
+        
+        
+IMAGE_PATH = "/home/aamjad/env/data/image2"
+dataset_directory = "/home/aamjad/env/data"
+
+def read_labels(directory):
+    df = pd.read_csv(f"{directory}/train.csv")
+    return df
+
+def clean_df(*_dfs):
+    for _df in _dfs:
+        del _df
+    gc.collect()
+    
+  generate_image_dataset(dataset_directory)
+ frame_rate, dataset = read_dataset(dataset_directory)
+labels_df = read_labels(dataset_directory)
+X = labels_df.clip_name.apply(lambda x: x + ".png")
+y = labels_df.label
+clean_df(labels_df)
+
+def run_experiment(_model, _X_train, _X_test, _y_train, _y_test):
+    model.fit(_X_train, _y_train)
+    prediction = _model.predict(_X_train)
+    print(f"Training accuracy: {accuracy_score(prediction, _y_train)}")
+    print(f"Training F1: {f1_score(prediction, _y_train)}")
+    print(f"Training AUC: {roc_auc_score(prediction, _y_train)}")
+    print(classification_report(prediction, _y_train))
+    prediction = _model.predict(_X_test)
+    print("----")
+    print(f"Testing Accuracy: {accuracy_score(prediction, _y_test)}")
+    print(f"Testing F1: {f1_score(prediction, _y_test)}")
+    print(f"Testing AUC: {roc_auc_score(prediction, _y_test)}")
+    print(classification_report(prediction, _y_test))
+
+def read_and_reshape_image(_path):
+    img = PIL.Image.open(_path).convert("RGB")#RGBA
+    img = img.resize((64,64))
+    return np.array(img)
+
+X_train_original = np.array([read_and_reshape_image(f"{IMAGE_PATH}/{x}") for x in X_train_original])
+X_test_original = np.array([read_and_reshape_image(f"{IMAGE_PATH}/{x}") for x in X_test_original])
+
+X_train_original, X_test_original, y_train_original, y_test_original = train_test_split(X, y, test_size=0.3, stratify=y)
+clean_df(X, y)
+
+
+s = X_train_original.shape
+X_train = X_train_original.reshape((s[0], s[1] * s[2] * s[3]))
+
+
+s = X_test_original.shape
+X_test = X_test_original.reshape((s[0], s[1] * s[2] * s[3]))
+
+
+y_train, y_test = y_train_original, y_test_original
+
+## Vgg16 Model
+ROWS, COLUMNS = 62, 62
+vgg_model = keras.applications.VGG16(input_shape=(ROWS, COLUMNS, 3), include_top = False, weights= 'imagenet')
+for layer in vgg_model.layers:
+    layer.trainable = False
+
+
+x = keras.layers.Flatten()(vgg_model.output)
+x = keras.layers.Dense(100, activation='relu')(x)
+predictions = keras.layers.Dense(1, activation='sigmoid')(x)
+
+# creating the full model:
+full_model = keras.models.Model(inputs=vgg_model.input, outputs=predictions)
+full_model.summary()
+
+def reshape_it(_a):
+    return _a.reshape((_a.shape[0], ROWS, COLUMNS, 3))
+
+
+model.compile(loss='BinaryCrossentropy',
+                  optimizer=keras.optimizers.Adamax(lr=0.0023),
+                  metrics=['acc', tf.keras.metrics.AUC()])
+history = model.fit(reshape_it(X_train), y_train, batch_size = 1400, epochs = 5, initial_epoch = 0, validation_data = (reshape_it(X_test), y_test))
+model.fit(reshape_it(X_train), y_train, batch_size = 1400, epochs = 10, initial_epoch = 0, validation_data = (reshape_it(X_test), y_test))
